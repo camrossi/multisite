@@ -168,6 +168,9 @@ class Schema:
         self.hed = hed 
         self.schema = self.getSchemaByName(name)
         self.schemId = self.schema['id']
+    
+    def getTempListID(self, templates, name):
+        return next((index for (index, d) in enumerate(templates) if d["name"] == name), None)
 
     def getAllSchema(self):
         self.logger.debug("Get all Schemas")
@@ -188,14 +191,19 @@ class Schema:
         self.logger.debug("Schema ID %s", schema['id']) 
         return schema['id'] 
 
-    def addBD(self,template_name, name,vrf, intersiteBumTrafficAllowm = True, 
+    def addBD(self,bd_template_name, name,vrf, vrf_template_name = None, intersiteBumTrafficAllowm = True, 
         l2Stretch = True, l2UnknownUnicast = 'proxy',optimizeWanBandwidth = True, 
         subnets = []):
-        
+        # Here we need to pass a of parameters just keep in mind that the tempale for the VRF cab be different for the template
+        #of the BD so I give the ability to specify this. 
+
+        if not vrf_template_name:
+            vrf_template_name = bd_template_name
+
         if l2Stretch:
            bd = {
-                       "bdRef": "/schemas/" + self.schemId + "/templates/" + template_name + "/bds/"+ name,
-                       'vrfRef':"/schemas/" + self.schemId + "/templates/" + template_name + '/vrfs/' + vrf,
+                       "bdRef": "/schemas/" + self.schemId + "/templates/" + bd_template_name + "/bds/"+ name,
+                       'vrfRef':"/schemas/" + self.schemId + "/templates/" + vrf_template_name + '/vrfs/' + vrf,
                        "displayName": name,
                        "intersiteBumTrafficAllow": intersiteBumTrafficAllowm,
                        "l2Stretch": l2Stretch,
@@ -204,18 +212,20 @@ class Schema:
                        "optimizeWanBandwidth": optimizeWanBandwidth,
                        "subnets": subnets
                         }
+           index =  self.getTempListID(self.schema['templates'], bd_template_name)
            
-           if bd not in self.schema['templates'][0]['bds']:
-                self.schema['templates'][0]['bds'].append(bd)
+           if bd not in self.schema['templates'][index]['bds']:
+                self.schema['templates'][index]['bds'].append(bd)
                 self.logger.debug("Adding BD %s", name)
            else:
                self.logger.info("BD %s already exists, not addind", name)
         else:
             pass
     
-    def delBD(self, name):
+    def delBD(self, name, template_name):
         self.logger.debug("Deleting BD %s", name)
-        self.schema['templates'][0]['bds'][:] = [d for d in  self.schema['templates'][0]['bds'] if d.get('name') != name]
+        index =  self.getTempListID(self.schema['templates'], template_name)
+        self.schema['templates'][index]['bds'][:] = [d for d in  self.schema['templates'][index]['bds'] if d.get('name') != name]
 
                     
     def commit(self):
@@ -224,30 +234,4 @@ class Schema:
 
 
 
-        
-
-
-
-
-
-
-
-      # 
-      #              "bdRef": "/schemas/5b4d788f0f00007b02e2f49a/templates/Fab1_Fab2/bds/BD1",
-      #              "displayName": "BD1",
-      #              "intersiteBumTrafficAllow": true,
-      #              "l2Stretch": true,
-      #              "l2UnknownUnicast": "proxy",
-      #              "name": "BD1",
-      #              "optimizeWanBandwidth": true,
-      #              "subnets": [
-      #                  {
-      #                      "ip": "12.0.0.1/24",
-      #                      "scope": "private",
-      #                      "shared": false
-      #                  }
-      #              ],
-      #              "vrfRef": "/schemas/5b4d788f0f00007b02e2f49a/templates/Fab1_Fab2/vrfs/VRF1"
-      #
-
-
+       

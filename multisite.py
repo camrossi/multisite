@@ -34,48 +34,70 @@ class MSO:
 
     def login(self, username, password):
         data = {
-                     "username": username,
-                     "password": password
-                }
-    
+                "username": username,
+                "password": password
+               }
+        # Login into MSO and get Authentication toke.  
+        self.logger.debug("Log In to MSO")
         r = requests.post(self.mso_url + "/api/v1/auth/login",json=data, verify=False)
         login_data = json.loads(r.text) 
     
-    
-        self.logger.debug("Log In to MSO")
         self.auth_token = login_data['token']
         self.hed = {'Authorization': 'Bearer ' + self.auth_token}
+    
+    def createSchema(self, name, templateName, tenant):
+
+        tenantId = self.getTenantId(name = tenant)
+
+        data = {
+                   "displayName": name,
+                   "templates": [
+                                   {
+                                       "name": templateName,
+                                       "displayName": templateName,
+                                       "tenantId": tenantId
+                                   }
+                               ]
+                }
+
+
+        r = requests.post(self.mso_url + "/api/v1/schemas",json=data,headers=self.hed, verify=False)
+        self.logger.debug("Schema creation status %s, reson %s", r.status_code, r.reason)
+        if r.reason == "Conflict":
+             self.logger.info("Schema already exist! ")
         
-    def LoadSchema(self, name) :
-        self.schemas[name] = Schema(name, self.logger, self.mso_url, self.hed)
+        self.loadSchema(name)
+       
 
+    def loadSchema(self, name):
+        self.schemas[name] = Schema(name, False, self.logger, self.mso_url, self.hed)
             
-    def createTenant(self,name, displayName = None, desc = "", site_Ids = []):
-
+    def createTenant(self,name, displayName = None, desc = "", sites = []):
+        
         if not displayName:
             displayName = name
-
-        if len(site_Ids) > 0:
-            self.logger.debug("Create Tenant and map it to %d sites", len(site_Ids))
-        else:
-            self.logger.debug("Create Tenant, not mapped to any site")            
-
+        # Tenant Data 
         data = {
                 "displayName": displayName,
                 "name": name,
-                ")escription": desc,
+                "description": desc,
                 "siteAssociations": []
                 }
-
-        if len(site_Ids) > 0:
-           for siteId in site_Ids:
-               data['siteAssociations'].append({'siteId':siteId,'securityDomains':[]})
+        
+        #If I am mapping a Tenants to sites when I create it, then I add the site ID to the tenant siteAssociation.
+        if len(sites) > 0:
+            self.logger.debug("Create Tenant and map it to %d sites", len(sites))
+            for site in sites:
+               data['siteAssociations'].append({'siteId':self.getSiteId(site),'securityDomains':[]})
+               print(data['siteAssociations'])
+        
+        else:
+            self.logger.debug("Create Tenant, not mapped to any site")   
 
         r = requests.post(self.mso_url + "/api/v1/tenants",json=data,headers=self.hed, verify=False)
-        self.logger.debug("Log In to MSO %s, reason %s", r.status_code, r.reason)
+        self.logger.debug("Tenant creation status %s, reson %s", r.status_code, r.reason)
         if r.reason == "Conflict":
-             self.logger.error("Tenant already exist! Please use the modifyTenant method ")
-             exit()
+             self.logger.info("Tenant already exist! ")
 
     def getAllTenants(self):
         self.logger.debug("Get all Tenants")
@@ -84,8 +106,10 @@ class MSO:
         self.logger.debug("Found a total of %d Tenants", len(tenants['tenants']))     
         return tenants
 
+
     def getTenantByName(self,name):
         
+        #API does not support filtering so I need anyway to pull all the tenants and then find.
         tenants = self.getAllTenants()
         self.logger.debug("Looking for Tenant name %s", name)
         
@@ -134,12 +158,29 @@ class MSO:
         r = requests.put(self.mso_url + "/api/v1/tenants/" + tenant['id'] ,json=tenant, headers=self.hed, verify=False)
         self.logger.debug('Tenant update status %s %s',r.status_code, r.reason)
 
-         
+    def createSite(self, name, url, username, password, siteID):
+        data = {
+                  "name": name,
+                  "urls": url,
+                  "username": username,
+                  "password": password,
+                  "apicSiteId" : siteID
+               }
+
+        r = requests.post(self.mso_url + "/api/v1/sites",json=data,headers=self.hed, verify=False)
+        self.logger.debug("Site creation status %s, reson %s", r.status_code, r.reason)
+        if r.reason == "Conflict":
+             self.logger.info("Tenant already exist! ")
+
     def getAllSites(self):
         self.logger.debug("Get all Sites")
         r = requests.get(self.mso_url + "/api/v1/sites", headers=self.hed, verify=False)
         sites = json.loads(r.text)
-        self.logger.debug("Found a total of %d sites", len(sites['sites']))     
+        self.logger.debug("Found a total of %d sites", len(sites['sites']))   
+        if len(sites['sites'])==0:
+            self.logger.error("No sites found, please create a site first!\n Execution Aborted")
+            exit()
+
         return sites
     
     def getSiteByName(self, name):
@@ -158,19 +199,30 @@ class MSO:
         site = self.getSiteByName(name)
         self.logger.debug("Site ID %s", site['id']) 
         return site['id'] 
-    
-    
 
 class Schema:
-    def __init__(self, name, logger, mso_url, hed):
+    def __init__(self, name, create, logger, mso_url,  hed):
         self.logger = logger
         self.mso_url = mso_url
         self.hed = hed 
-        self.schema = self.getSchemaByName(name)
-        self.schemId = self.schema['id']
+        if create:
+            self.schema = self.createSchema(name, tenant, templateName)
+                                             
+        else:
+            self.schema = self.getSchemaByName(name)
+
+        self.schemId =  self.schema['id']
+
+
+
     
     def getTempListID(self, templates, name):
-        return next((index for (index, d) in enumerate(templates) if d["name"] == name), None)
+        index =  next((index for (index, d) in enumerate(templates) if d["name"] == name), None)
+        if index != None :
+            return index
+        else:
+            self.logger.error("Template %s not found", name)
+            exit()
 
     def getAllSchema(self):
         self.logger.debug("Get all Schemas")
@@ -190,7 +242,7 @@ class Schema:
         schema = self.getSchemaByName(name)
         self.logger.debug("Schema ID %s", schema['id']) 
         return schema['id'] 
-
+    
     def addBD(self,bd_template_name, name,vrf, vrf_template_name = None, intersiteBumTrafficAllowm = True, 
         l2Stretch = True, l2UnknownUnicast = 'proxy',optimizeWanBandwidth = True, 
         subnets = []):
@@ -200,27 +252,31 @@ class Schema:
         if not vrf_template_name:
             vrf_template_name = bd_template_name
 
+        bd = {
+                    "bdRef": "/schemas/" + self.schemId + "/templates/" + bd_template_name + "/bds/"+ name,
+                    'vrfRef':"/schemas/" + self.schemId + "/templates/" + vrf_template_name + '/vrfs/' + vrf,
+                    "displayName": name,
+                    "intersiteBumTrafficAllow": intersiteBumTrafficAllowm,
+                    "l2Stretch": l2Stretch,
+                    "l2UnknownUnicast": l2UnknownUnicast,
+                    "name": name,
+                    "optimizeWanBandwidth": optimizeWanBandwidth,
+                    "subnets": []
+
+                     } 
         if l2Stretch:
-           bd = {
-                       "bdRef": "/schemas/" + self.schemId + "/templates/" + bd_template_name + "/bds/"+ name,
-                       'vrfRef':"/schemas/" + self.schemId + "/templates/" + vrf_template_name + '/vrfs/' + vrf,
-                       "displayName": name,
-                       "intersiteBumTrafficAllow": intersiteBumTrafficAllowm,
-                       "l2Stretch": l2Stretch,
-                       "l2UnknownUnicast": l2UnknownUnicast,
-                       "name": name,
-                       "optimizeWanBandwidth": optimizeWanBandwidth,
-                       "subnets": subnets
-                        }
-           index =  self.getTempListID(self.schema['templates'], bd_template_name)
-           
-           if bd not in self.schema['templates'][index]['bds']:
-                self.schema['templates'][index]['bds'].append(bd)
-                self.logger.debug("Adding BD %s", name)
-           else:
-               self.logger.info("BD %s already exists, not addind", name)
+            bd['subnets'] = subnets
         else:
             pass
+
+
+        index =  self.getTempListID(self.schema['templates'], bd_template_name)
+           
+        if bd not in self.schema['templates'][index]['bds']:
+           self.schema['templates'][index]['bds'].append(bd)
+           self.logger.debug("Adding BD %s", name)
+        else:
+           self.logger.info("BD %s already exists, not addind", name)
     
     def delBD(self, name, template_name):
         self.logger.debug("Deleting BD %s", name)

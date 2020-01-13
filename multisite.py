@@ -35,13 +35,12 @@ class MSO:
     def login(self, username, password):
         data = {
                 "username": username,
-                "password": password
+                "password": password,
                }
         # Login into MSO and get Authentication toke.  
         self.logger.debug("Log In to MSO")
         r = requests.post(self.mso_url + "/api/v1/auth/login",json=data, verify=False)
         login_data = json.loads(r.text) 
-    
         self.auth_token = login_data['token']
         self.hed = {'Authorization': 'Bearer ' + self.auth_token}
     
@@ -199,7 +198,23 @@ class MSO:
         site = self.getSiteByName(name)
         self.logger.debug("Site ID %s", site['id']) 
         return site['id'] 
-
+    
+    def getAudit(self):
+        limit = str(100)
+        offset = str(0)
+        audit = []
+        sort='-timestamp'
+        while(offset):
+            r = requests.get(self.mso_url + "/api/v1/audit-records?limit="+limit+"&offset="+offset+"&sort="+sort, headers=self.hed, verify=False)
+            limit = r.headers['X-Page-Limit']
+            if 'X-Page-Next-Offset' in r.headers:
+                offset = r.headers['X-Page-Next-Offset']                
+            else:
+                offset = False
+                
+            audit= audit + (json.loads(r.text)['auditRecords'])
+        return audit
+    
 class Schema:
     def __init__(self, name, create, logger, mso_url,  hed):
         self.logger = logger
@@ -289,5 +304,3 @@ class Schema:
         self.logger.debug('Schema update status %s %s',r.status_code, r.reason)
 
 
-
-       
